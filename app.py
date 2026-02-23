@@ -175,44 +175,48 @@ def separar_dados_atleta(df, atleta, tipo='linha'):
     except: pass
     return dados_assert, dados_volume, dados_minutos
 
+# NOME NOVO (v2) PARA QUEBRAR O CACHE ANTIGO!
 @st.cache_data(ttl=300)
-def carregar_scouts_jogos_dinamico(links_selecionados, nomes_jogos):
+def carregar_scouts_dinamico_v2(links_selecionados, nomes_jogos):
     if not links_selecionados: return pd.DataFrame()
     dfs = []
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    palavras_chave = ['FieldX', 'Field X', 'X', 'Tempo', 'Time', 'Evento', 'Event']
+    headers_req = {'User-Agent': 'Mozilla/5.0'}
 
     for url, nome_exibicao in zip(links_selecionados, nomes_jogos):
         if pd.isna(url) or str(url).strip() == "": continue
         try:
             final_url = converter_link_drive(url)
-            r = requests.get(final_url, headers=headers)
+            r = requests.get(final_url, headers=headers_req)
             if r.status_code == 200:
                 xls = pd.ExcelFile(io.BytesIO(r.content), engine='openpyxl')
                 for sheet in xls.sheet_names:
-                    if "Resumo" in sheet: continue
+                    # Ignora abas inúteis
+                    if any(x in str(sheet).upper() for x in ["RESUMO", "DASHBOARD", "INFO", "GERAL"]): continue
+                    
                     df_s = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=50)
                     h_idx = -1
+                    
+                    # Identificador cego de cabeçalho: Checa a linha exata (ignora "Temporada")
                     for i, row in df_s.iterrows():
-                        linha_texto = str(row.values)
-                        if any(pc in linha_texto for pc in palavras_chave):
+                        linha_arr = [str(val).strip().upper() for val in row.values if pd.notna(val)]
+                        if any(c in linha_arr for c in ['X', 'FIELD X', 'FIELDX', 'EVENTO', 'EVENT', 'ACTION', 'CATEGORIA', 'TIPO']):
                             h_idx = i
                             break
+                            
                     if h_idx != -1:
                         data = pd.read_excel(xls, sheet_name=sheet, header=h_idx)
                         cols_novas = {}
                         for c in data.columns:
-                            c_str = str(c).strip()
-                            if c_str in ['X', 'Field X']: cols_novas[c] = 'FieldX'
-                            elif c_str in ['Y', 'Field Y']: cols_novas[c] = 'FieldY'
-                            elif c_str in ['Time', 'Tempo (s)']: cols_novas[c] = 'Tempo'
-                            elif c_str in ['Player', 'Atleta']: cols_novas[c] = 'Jogadores'
-                        data.rename(columns=cols_novas, inplace=True)
+                            c_str = str(c).strip().upper()
+                            if c_str in ['X', 'FIELD X']: cols_novas[c] = 'FieldX'
+                            elif c_str in ['Y', 'FIELD Y']: cols_novas[c] = 'FieldY'
+                            elif c_str in ['TIME', 'TEMPO (S)', 'TEMPO']: cols_novas[c] = 'Tempo'
+                            elif c_str in ['PLAYER', 'ATLETA', 'JOGADOR', 'JOGADORES']: cols_novas[c] = 'Jogadores'
+                            elif c_str in ['EVENTO', 'EVENT', 'ACTION', 'AÇÃO', 'CATEGORIA', 'TIPO']: cols_novas[c] = 'Evento'
                         
-                        # --- CAPTURA A CATEGORIA DO NOME DA ABA E DA PRIMEIRA COLUNA ---
+                        data.rename(columns=cols_novas, inplace=True)
                         data['Jogo'] = nome_exibicao
-                        data['Categoria_Acao'] = sheet
-                        data['Categoria_Acao_Col0'] = data.iloc[:, 0].astype(str)
+                        data['Categoria_Acao_Aba'] = sheet # Salva a categoria com base no nome da aba
                         dfs.append(data)
         except: continue
             
@@ -236,18 +240,20 @@ def carregar_scouts_jogos_dinamico(links_selecionados, nomes_jogos):
         df['Minuto'] = df['Tempo'].apply(t_min)
         
     if 'Jogadores' in df.columns:
-        # Lê os jogadores suportando vírgula ou traço no lugar da barra vertical (|)
-        def processar_passador(x):
-            s = str(x).replace(',', '|').replace(' - ', '|').split('|')
+        # Extrai os nomes suportando vírgula, traço ou barra
+        def proc_passador(x):
+            if pd.isna(x): return x
+            s = str(x).replace(',', '|').replace(' - ', '|').replace('-', '|').split('|')
             return s[0].strip()
             
-        def processar_receptor(x):
-            s = str(x).replace(',', '|').replace(' - ', '|').split('|')
-            return s[1].strip() if len(s) > 1 else None
+        def proc_receptor(x):
+            if pd.isna(x): return None
+            s = str(x).replace(',', '|').replace(' - ', '|').replace('-', '|').split('|')
+            return s[1].strip() if len(s) > 1 and s[1].strip() != "" else None
 
-        df['Passador'] = df['Jogadores'].apply(processar_passador)
-        df['Receptor'] = df['Jogadores'].apply(processar_receptor)
-        df['Jogadores'] = df['Passador']
+        df['Passador'] = df['Jogadores'].apply(proc_passador)
+        df['Receptor'] = df['Jogadores'].apply(proc_receptor)
+        df['Jogadores'] = df['Passador'] # Mantem passador na coluna principal
         
     if URL_NOMES:
         df_nomes = carregar_planilha_csv(URL_NOMES)
@@ -388,7 +394,7 @@ if st.sidebar.button("ATLETAS"): st.session_state.tela = 'Grid'
 # Seletor de Jogo
 filtro = st.sidebar.selectbox("Selecionar Jogo", opcoes_jogos)
 
-# Carregamento Dinâmico dos Dados do LongoMatch (df_master)
+# Chama a FUNÇÃO NOVA (v2)
 if not df_campanha.empty and col_link in df_campanha.columns:
     if filtro == "Todos":
         links = df_campanha[col_link].tolist()
@@ -398,7 +404,7 @@ if not df_campanha.empty and col_link in df_campanha.columns:
         links = selecao[col_link].tolist()
         nomes = selecao['Nome_Exibicao'].tolist()
     
-    df_master = carregar_scouts_jogos_dinamico(links, nomes)
+    df_master = carregar_scouts_dinamico_v2(links, nomes)
 else:
     df_master = pd.DataFrame()
 
@@ -437,13 +443,14 @@ elif st.session_state.tela == 'Equipe':
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        # Filtra onde a aba do arquivo OU a 1ª coluna contém a palavra "PASSE"
-        if 'Categoria_Acao' in df_jogo.columns:
-            mask_passe = df_jogo['Categoria_Acao'].astype(str).str.upper().str.contains('PASSE', na=False) | \
-                         df_jogo['Categoria_Acao_Col0'].astype(str).str.upper().str.contains('PASSE', na=False)
-            df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor'])
-        else:
-            df_passes_validos = df_jogo.dropna(subset=['Receptor'])
+        # Filtra onde a aba do arquivo OU a coluna Evento contém a palavra "PASSE"
+        mask_passe = pd.Series(False, index=df_jogo.index)
+        if 'Evento' in df_jogo.columns:
+            mask_passe = mask_passe | df_jogo['Evento'].astype(str).str.upper().str.contains('PASSE', na=False)
+        if 'Categoria_Acao_Aba' in df_jogo.columns:
+            mask_passe = mask_passe | df_jogo['Categoria_Acao_Aba'].astype(str).str.upper().str.contains('PASSE', na=False)
+            
+        df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor'])
 
         if not df_passes_validos.empty:
             locs = df_passes_validos.groupby('Passador').agg({'FieldX':'mean','FieldY':'mean','Jogadores':'count'})
@@ -460,7 +467,7 @@ elif st.session_state.tela == 'Equipe':
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
         else:
-            st.info("Nenhum passe com destinatário anotado. (Para a matriz funcionar, marque 'Passador | Receptor' no scout)")
+            st.info("Nenhum passe com destinatário anotado. (O scout não encontrou as barrinhas ou vírgulas)")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
@@ -476,7 +483,7 @@ elif st.session_state.tela == 'Equipe':
             st.pyplot(f)
             
         with m2:
-            st.write("Mapa de Ações (Volume Total)")
+            st.write("Mapa de Ações (Total)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0: p_map.scatter(df_f.FieldX, df_f.FieldY, ax=a, c='#CC0000', alpha=0.5)
             st.pyplot(f)
@@ -485,14 +492,14 @@ elif st.session_state.tela == 'Equipe':
             st.write("Ofensivo (Finalizações)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0:
-                if 'Categoria_Acao' in df_f.columns:
-                    mask_fin = df_f['Categoria_Acao'].astype(str).str.upper().str.contains('FINALIZA', na=False) | \
-                               df_f['Categoria_Acao_Col0'].astype(str).str.upper().str.contains('FINALIZA', na=False)
-                    fins = df_f[mask_fin]
-                    # Se ele não encontrar nenhuma finalização anotada, volta a mostrar as ações na área
-                    if len(fins) == 0: 
-                        fins = df_f[df_f['FieldX'] > 80]
-                else:
+                mask_fin = pd.Series(False, index=df_f.index)
+                if 'Evento' in df_f.columns:
+                    mask_fin = mask_fin | df_f['Evento'].astype(str).str.upper().str.contains('FINALIZA', na=False)
+                if 'Categoria_Acao_Aba' in df_f.columns:
+                    mask_fin = mask_fin | df_f['Categoria_Acao_Aba'].astype(str).str.upper().str.contains('FINALIZA', na=False)
+                
+                fins = df_f[mask_fin]
+                if len(fins) == 0: 
                     fins = df_f[df_f['FieldX'] > 80]
                 
                 if len(fins) > 0:

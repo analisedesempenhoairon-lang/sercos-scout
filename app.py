@@ -11,7 +11,7 @@ import sys
 import subprocess
 import os
 
-# --- CORREÇÃO DE AMBIENTE (Obrigatório para o Graphviz funcionar no Windows) ---
+# --- CORREÇÃO DE AMBIENTE ---
 try:
     import graphviz
 except ImportError:
@@ -23,11 +23,11 @@ if os.path.exists(caminho_bin):
     if caminho_bin not in os.environ["PATH"]:
         os.environ["PATH"] += os.pathsep + caminho_bin
 
-# --- 1. CONFIGURAÇÃO INICIAL ---
+# --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="SERCOS SCOUT 2026", layout="wide")
 warnings.filterwarnings("ignore")
 
-# --- 2. LINKS DE DADOS ---
+# --- LINKS DE DADOS ---
 URL_ARQUIVO_GERAL = "https://docs.google.com/spreadsheets/d/1kvs8qoZTeZql99qt_NxTQ2ZsW33V8HEAkjaOdBivrYM/edit?usp=sharing"
 URL_MAPA_MENTAL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1682508291&single=true&output=csv"
 URL_CLASSIFICACAO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1057602586&single=true&output=csv"
@@ -155,9 +155,9 @@ def separar_dados_atleta(df, atleta, tipo='linha'):
     except: pass
     return dados_assert, dados_volume, dados_minutos
 
-# --- O TRATOR (v5) ---
+# --- O EXECUTOR (v6) - COM REGRAS EXATAS DAS ABAS ---
 @st.cache_data(ttl=300)
-def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
+def carregar_scouts_dinamico_v6(links_selecionados, nomes_jogos):
     if not links_selecionados: return pd.DataFrame()
     dfs = []
     headers_req = {'User-Agent': 'Mozilla/5.0'}
@@ -185,7 +185,8 @@ def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
                     
                     for i, row in df_s.iterrows():
                         linha_arr = [str(val).strip().upper() for val in row.values if pd.notna(val)]
-                        if any(c in linha_arr for c in ['X', 'FIELD X', 'FIELDX', 'EVENTO', 'EVENT', 'ACTION', 'CATEGORIA', 'TIPO']):
+                        # Garante que acha o cabeçalho pelas palavras chaves comuns
+                        if any(c in linha_arr for c in ['X', 'FIELD X', 'FIELDX', 'EVENTO', 'EVENT', 'ACTION', 'CATEGORIA', 'TIPO', 'TEMPO']):
                             h_idx = i
                             break
                             
@@ -202,7 +203,7 @@ def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
                         
                         data.rename(columns=cols_novas, inplace=True)
                         data['Jogo'] = nome_exibicao
-                        data['Categoria_Acao_Aba'] = sheet
+                        data['Categoria_Acao_Aba'] = str(sheet).strip().upper() # Padronizado pra maiúsculo
                         dfs.append(data)
         except: continue
             
@@ -210,12 +211,12 @@ def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
     df = pd.concat(dfs, ignore_index=True)
     df.columns = [str(c).strip() for c in df.columns]
 
-    # SUBSTITUIÇÃO GLOBAL (Traduz tudo de uma vez)
     def traduzir_nome(x):
         x_str = str(x).strip()
         if x_str in dic_nomes: return dic_nomes[x_str]
         return x_str
 
+    # Traduz os nomes onde eles aparecerem
     for col in df.select_dtypes(include=['object']).columns:
         df[col] = df[col].apply(traduzir_nome)
     
@@ -255,7 +256,7 @@ def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
         df['Receptor'] = df['Jogadores'].apply(proc_receptor)
         df['Jogadores'] = df['Passador'] 
         
-        # VARREDURA TOTAL DE RECEPTORES (Caça o nome em qualquer coluna)
+        # Caça receptores que ficaram nas colunas secretas
         colunas_busca = [c for c in df.columns if c not in ['Jogo', 'Categoria_Acao_Aba', 'Tempo', 'Minuto', 'FieldX', 'FieldY', 'Evento', 'Passador', 'Receptor', 'Jogadores']]
         for idx, row in df.iterrows():
             rec_atual = row.get('Receptor')
@@ -389,7 +390,7 @@ if not df_campanha.empty and col_link in df_campanha.columns:
         links = selecao[col_link].tolist()
         nomes = selecao['Nome_Exibicao'].tolist()
     
-    df_master = carregar_scouts_dinamico_v5(links, nomes)
+    df_master = carregar_scouts_dinamico_v6(links, nomes)
 else:
     df_master = pd.DataFrame()
 
@@ -427,12 +428,17 @@ elif st.session_state.tela == 'Equipe':
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        cols_evento = [c for c in df_jogo.columns if str(c).upper() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION', 'NOME', 'TIPO', 'CATEGORIA_ACAO_ABA']]
-        mask_passe = pd.Series(False, index=df_jogo.index)
-        for c in cols_evento:
-            mask_passe = mask_passe | df_jogo[c].astype(str).str.upper().str.contains('PASS', na=False)
+        # 1. Filtra APENAS pelas abas específicas de Passe
+        abas_passes = ['PASSE', 'PASSE ULT TERCO', 'PASSE CHAVE', 'PASSE PROGRESSAO']
+        mask_passe = df_jogo['Categoria_Acao_Aba'].isin(abas_passes)
+        
+        # 2. Filtra APENAS os passes marcados como "CERTO"
+        colunas_texto = df_jogo.select_dtypes(include=['object']).columns
+        mask_certo = pd.Series(False, index=df_jogo.index)
+        for c in colunas_texto:
+            mask_certo = mask_certo | df_jogo[c].astype(str).str.upper().str.contains('CERTO', na=False)
             
-        df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor', 'FieldX', 'FieldY'])
+        df_passes_validos = df_jogo[mask_passe & mask_certo].dropna(subset=['Receptor', 'FieldX', 'FieldY'])
 
         if not df_passes_validos.empty:
             locs = df_passes_validos.groupby('Passador').agg({'FieldX':'mean','FieldY':'mean','Jogadores':'count'})
@@ -449,7 +455,7 @@ elif st.session_state.tela == 'Equipe':
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
         else:
-            st.info("Nenhum passe com receptor anotado (ou com coordenadas válidas) neste jogo.")
+            st.info("Nenhum passe com o marcador 'CERTO' registrado neste jogo.")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
@@ -476,13 +482,11 @@ elif st.session_state.tela == 'Equipe':
             st.write("Ofensivo (Finalizações)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f_coords)>0:
-                mask_fin = pd.Series(False, index=df_f_coords.index)
-                for c in cols_evento:
-                    mask_fin = mask_fin | df_f_coords[c].astype(str).str.upper().str.contains('FINALIZA', na=False)
-                    mask_fin = mask_fin | df_f_coords[c].astype(str).str.upper().str.contains('CHUTE', na=False)
-                
+                # Agora procura exclusivamente pela aba FINALIZACAO
+                mask_fin = df_f_coords['Categoria_Acao_Aba'] == 'FINALIZACAO'
                 fins = df_f_coords[mask_fin]
                 if len(fins) == 0: 
+                    # Se não achar nada na aba, cai no backup de X>80
                     fins = df_f_coords[df_f_coords['FieldX'] > 80]
                 
                 if len(fins) > 0:
@@ -493,9 +497,8 @@ elif st.session_state.tela == 'Equipe':
     with st.expander("🛠️ DEPURADOR DE DADOS"):
         if df_jogo.empty: st.error("Nenhum dado encontrado.")
         else:
-            st.write("**Colunas detectadas:**", df_jogo.columns.tolist())
-            if 'Passador' in df_jogo.columns: st.write("**Lidos como PASSADOR:**", df_jogo['Passador'].dropna().unique().tolist())
-            if 'Receptor' in df_jogo.columns: st.write("**Lidos como RECEPTOR:**", df_jogo['Receptor'].dropna().unique().tolist())
+            st.write("**Abas lidas do Excel:**", df_jogo['Categoria_Acao_Aba'].unique().tolist())
+            st.write("**Total de ações:**", len(df_jogo))
 
 elif st.session_state.tela == 'Grid':
     st.title("ELENCO")

@@ -420,17 +420,21 @@ elif st.session_state.tela == 'Equipe':
     st.divider(); st.subheader("Controle de Cartões")
     if not df_cartoes.empty: st.dataframe(df_cartoes, use_container_width=True, hide_index=True)
     
+    # Procura dinamicamente o nome da coluna de Eventos
+    col_evento = None
+    if not df_jogo.empty:
+        for c in df_jogo.columns:
+            if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION', 'TIPO', 'NOME']:
+                col_evento = c
+                break
+
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        # Procura a coluna que contém o nome da ação no LongoMatch
-        col_evento = next((c for c in df_jogo.columns if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION']), None)
-        
         if col_evento:
-            tipos_passes = ['PASSE CHAVE', 'PASSE', 'PASSE PROGRESSAO', 'PASSE ULT TERCO']
-            # Filtra apenas as linhas que correspondem a um desses passes exatos
-            df_passes_validos = df_jogo[df_jogo[col_evento].astype(str).str.upper().str.strip().isin(tipos_passes)]
-            df_passes_validos = df_passes_validos.dropna(subset=['Receptor'])
+            # Filtra onde a ação contém "PASSE" (pega Passe Chave, Passe, Passe Progressao, etc)
+            mask_passe = df_jogo[col_evento].astype(str).str.upper().str.contains('PASSE', na=False)
+            df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor'])
         else:
             df_passes_validos = df_jogo.dropna(subset=['Receptor'])
 
@@ -448,6 +452,8 @@ elif st.session_state.tela == 'Equipe':
             st.write("**Matriz de Passes**")
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
+        else:
+            st.info("Nenhum passe registrado nos dados com esse filtro.")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
@@ -456,9 +462,6 @@ elif st.session_state.tela == 'Equipe':
         m1, m2, m3 = st.columns(3)
         p_cfg = dict(pitch_type='statsbomb', pitch_color='#1e1e1e', line_color='#444')
         
-        # Identifica a coluna de Evento novamente
-        col_evento = next((c for c in df_jogo.columns if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION']), None)
-
         with m1:
             st.write("Mapa de Calor")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
@@ -480,7 +483,9 @@ elif st.session_state.tela == 'Equipe':
                     fins = df_f[df_f[col_evento].astype(str).str.upper().str.contains('FINALIZA', na=False)]
                 else:
                     fins = df_f[df_f['FieldX'] > 80]
-                p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
+                
+                if len(fins) > 0:
+                    p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
             st.pyplot(f)
 
 elif st.session_state.tela == 'Grid':

@@ -411,16 +411,16 @@ elif st.session_state.tela == 'Equipe':
             st.pyplot(f)
             
         with m2:
-            st.write("Mapa de Ações (Total)")
+            st.write("Mapa de Ações")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f_coords)>0: p_map.scatter(df_f_coords.FieldX, df_f_coords.FieldY, ax=a, c='#CC0000', alpha=0.5)
             st.pyplot(f)
             
         with m3:
-            st.write("Ofensivo (Finalizações)")
+            st.write("Ofensivo")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f_coords)>0:
-                mask_fin = df_f_coords['Evento'].astype(str).str.upper().str.contains('FINALIZA', na=False)
+                mask_fin = df_f_coords['Evento'].astype(str).str.upper().str.contains('FINALIZACAO', na=False)
                 fins = df_f_coords[mask_fin]
                 if len(fins) == 0: fins = df_f_coords[df_f_coords['FieldX'] > 80]
                 if len(fins) > 0: p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')

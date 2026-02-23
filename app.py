@@ -155,20 +155,18 @@ def separar_dados_atleta(df, atleta, tipo='linha'):
     except: pass
     return dados_assert, dados_volume, dados_minutos
 
-# --- O EXECUTOR (v6) - COM REGRAS EXATAS DAS ABAS ---
+# --- NOVO LEITOR BLINDADO (TABELA PLANA - v7) ---
 @st.cache_data(ttl=300)
-def carregar_scouts_dinamico_v6(links_selecionados, nomes_jogos):
+def carregar_scouts_dinamico_v7(links_selecionados, nomes_jogos):
     if not links_selecionados: return pd.DataFrame()
     dfs = []
     headers_req = {'User-Agent': 'Mozilla/5.0'}
 
     dic_nomes = {}
-    nomes_reais_validos = []
     if URL_NOMES:
         df_nomes_temp = carregar_planilha_csv(URL_NOMES)
         if not df_nomes_temp.empty:
             dic_nomes = dict(zip(df_nomes_temp['Nome_Arquivo'].astype(str).str.strip(), df_nomes_temp['Nome_Real'].astype(str).str.strip()))
-            nomes_reais_validos = list(set([str(v).strip() for v in dic_nomes.values() if str(v).strip() != 'nan']))
 
     for url, nome_exibicao in zip(links_selecionados, nomes_jogos):
         if pd.isna(url) or str(url).strip() == "": continue
@@ -180,105 +178,52 @@ def carregar_scouts_dinamico_v6(links_selecionados, nomes_jogos):
                 for sheet in xls.sheet_names:
                     if any(x in str(sheet).upper() for x in ["RESUMO", "DASHBOARD", "INFO", "GERAL"]): continue
                     
-                    df_s = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=50)
-                    h_idx = -1
+                    data = pd.read_excel(xls, sheet_name=sheet)
+                    data.columns = [str(c).strip().upper() for c in data.columns]
                     
-                    for i, row in df_s.iterrows():
-                        linha_arr = [str(val).strip().upper() for val in row.values if pd.notna(val)]
-                        # Garante que acha o cabeçalho pelas palavras chaves comuns
-                        if any(c in linha_arr for c in ['X', 'FIELD X', 'FIELDX', 'EVENTO', 'EVENT', 'ACTION', 'CATEGORIA', 'TIPO', 'TEMPO']):
-                            h_idx = i
-                            break
-                            
-                    if h_idx != -1:
-                        data = pd.read_excel(xls, sheet_name=sheet, header=h_idx)
-                        cols_novas = {}
-                        for c in data.columns:
-                            c_str = str(c).strip().upper()
-                            if c_str in ['X', 'FIELD X', 'FIELDX']: cols_novas[c] = 'FieldX'
-                            elif c_str in ['Y', 'FIELD Y', 'FIELDY']: cols_novas[c] = 'FieldY'
-                            elif c_str in ['TIME', 'TEMPO (S)', 'TEMPO']: cols_novas[c] = 'Tempo'
-                            elif c_str in ['PLAYER', 'ATLETA', 'JOGADOR', 'JOGADORES']: cols_novas[c] = 'Jogadores'
-                            elif c_str in ['EVENTO', 'EVENT', 'ACTION', 'AÇÃO', 'CATEGORIA', 'TIPO']: cols_novas[c] = 'Evento'
-                        
-                        data.rename(columns=cols_novas, inplace=True)
+                    if 'EVENTO' in data.columns and 'JOGADORES' in data.columns:
                         data['Jogo'] = nome_exibicao
-                        data['Categoria_Acao_Aba'] = str(sheet).strip().upper() # Padronizado pra maiúsculo
                         dfs.append(data)
         except: continue
             
     if not dfs: return pd.DataFrame()
     df = pd.concat(dfs, ignore_index=True)
-    df.columns = [str(c).strip() for c in df.columns]
-
-    def traduzir_nome(x):
-        x_str = str(x).strip()
-        if x_str in dic_nomes: return dic_nomes[x_str]
-        return x_str
-
-    # Traduz os nomes onde eles aparecerem
-    for col in df.select_dtypes(include=['object']).columns:
-        df[col] = df[col].apply(traduzir_nome)
     
-    if 'FieldX' not in df.columns and 'X' in df.columns: df.rename(columns={'X':'FieldX'}, inplace=True)
-    if 'FieldY' not in df.columns and 'Y' in df.columns: df.rename(columns={'Y':'FieldY'}, inplace=True)
-    
-    if 'Tempo' in df.columns:
-        def t_min(t):
-            try:
-                t = str(t).strip()
-                if ':' in t:
-                    p = t.split(':')
-                    if len(p) == 2: return float(p[0]) + float(p[1])/60
-                    elif len(p) == 3: return float(p[0])*60 + float(p[1]) + float(p[2])/60
-                return 0.0
-            except: return 0.0
-        df['Minuto'] = df['Tempo'].apply(t_min)
-        
-    if 'Jogadores' in df.columns:
-        def proc_passador(x):
-            if pd.isna(x) or str(x) == 'nan': return None
-            x_str = str(x)
-            for sep in ['|', '>', ',']:
-                if sep in x_str: return x_str.split(sep)[0].strip()
-            return x_str.strip()
-            
-        def proc_receptor(x):
-            if pd.isna(x) or str(x) == 'nan': return None
-            x_str = str(x)
-            for sep in ['|', '>', ',']:
-                if sep in x_str:
-                    parts = x_str.split(sep)
-                    if len(parts) > 1 and parts[1].strip() != "": return parts[1].strip()
-            return None
+    # Tratamento Mágico e Enxuto
+    if 'TEMPO' not in df.columns: df['TEMPO'] = 0.0
+    def t_min(t):
+        try:
+            t = str(t).strip()
+            if ':' in t:
+                p = t.split(':')
+                if len(p) == 2: return float(p[0]) + float(p[1])/60
+                elif len(p) == 3: return float(p[0])*60 + float(p[1]) + float(p[2])/60
+            return float(t)
+        except: return 0.0
+    df['Minuto'] = df['TEMPO'].apply(t_min)
 
-        df['Passador'] = df['Jogadores'].apply(proc_passador)
-        df['Receptor'] = df['Jogadores'].apply(proc_receptor)
-        df['Jogadores'] = df['Passador'] 
-        
-        # Caça receptores que ficaram nas colunas secretas
-        colunas_busca = [c for c in df.columns if c not in ['Jogo', 'Categoria_Acao_Aba', 'Tempo', 'Minuto', 'FieldX', 'FieldY', 'Evento', 'Passador', 'Receptor', 'Jogadores']]
-        for idx, row in df.iterrows():
-            rec_atual = row.get('Receptor')
-            if pd.isna(rec_atual) or str(rec_atual).strip() in ['', 'None', 'nan']:
-                for c in colunas_busca:
-                    val = str(row[c]).strip()
-                    passador_atual = str(row.get('Passador')).strip()
-                    if val in nomes_reais_validos and val != passador_atual:
-                        df.at[idx, 'Receptor'] = val
-                        break
+    # Divisão cirúrgica do |
+    if 'JOGADORES' in df.columns:
+        df['Passador'] = df['JOGADORES'].apply(lambda x: str(x).split('|')[0].strip() if pd.notna(x) else None)
+        df['Receptor'] = df['JOGADORES'].apply(lambda x: str(x).split('|')[1].strip() if pd.notna(x) and '|' in str(x) else None)
+        df['Jogadores'] = df['Passador']
 
-    if 'FieldX' in df.columns:
-        df['FieldX'] = pd.to_numeric(df['FieldX'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
-        df['FieldY'] = pd.to_numeric(df['FieldY'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
+    if dic_nomes:
+        for c in ['Jogadores', 'Passador', 'Receptor']:
+            if c in df.columns:
+                df[c] = df[c].astype(str).str.strip().replace(dic_nomes)
+                df[c] = df[c].replace({'nan': None, 'None': None, '<NA>': None, '': None})
+
+    if 'FIELDX' in df.columns:
+        df['FieldX'] = pd.to_numeric(df['FIELDX'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
+        df['FieldY'] = pd.to_numeric(df['FIELDY'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
         
         max_x = df['FieldX'].max()
-        if max_x <= 1.1: 
-            df['FieldX'] *= 120
-            df['FieldY'] *= 80
-        elif max_x <= 100: 
-            df['FieldX'] = (df['FieldX']/100)*120
-            df['FieldY'] = (df['FieldY']/100)*80
+        if max_x <= 1.1: df['FieldX'] *= 120; df['FieldY'] *= 80
+        elif max_x <= 100: df['FieldX'] = (df['FieldX']/100)*120; df['FieldY'] = (df['FieldY']/100)*80
+
+    if 'EVENTO' in df.columns: df['Evento'] = df['EVENTO']
+    if 'RESULTADO' in df.columns: df['Resultado_Acao'] = df['RESULTADO']
             
     return df
 
@@ -390,7 +335,7 @@ if not df_campanha.empty and col_link in df_campanha.columns:
         links = selecao[col_link].tolist()
         nomes = selecao['Nome_Exibicao'].tolist()
     
-    df_master = carregar_scouts_dinamico_v6(links, nomes)
+    df_master = carregar_scouts_dinamico_v7(links, nomes)
 else:
     df_master = pd.DataFrame()
 
@@ -428,16 +373,9 @@ elif st.session_state.tela == 'Equipe':
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        # 1. Filtra APENAS pelas abas específicas de Passe
-        abas_passes = ['PASSE', 'PASSE ULT TERCO', 'PASSE CHAVE', 'PASSE PROGRESSAO']
-        mask_passe = df_jogo['Categoria_Acao_Aba'].isin(abas_passes)
-        
-        # 2. Filtra APENAS os passes marcados como "CERTO"
-        colunas_texto = df_jogo.select_dtypes(include=['object']).columns
-        mask_certo = pd.Series(False, index=df_jogo.index)
-        for c in colunas_texto:
-            mask_certo = mask_certo | df_jogo[c].astype(str).str.upper().str.contains('CERTO', na=False)
-            
+        # Filtro de Matriz Exato: Evento tem "PASSE" e Resultado tem "CERTO"
+        mask_passe = df_jogo['Evento'].astype(str).str.upper().str.contains('PASSE', na=False)
+        mask_certo = df_jogo['Resultado_Acao'].astype(str).str.upper().str.contains('CERTO', na=False)
         df_passes_validos = df_jogo[mask_passe & mask_certo].dropna(subset=['Receptor', 'FieldX', 'FieldY'])
 
         if not df_passes_validos.empty:
@@ -455,7 +393,7 @@ elif st.session_state.tela == 'Equipe':
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
         else:
-            st.info("Nenhum passe com o marcador 'CERTO' registrado neste jogo.")
+            st.info("Nenhum passe Certo com Receptor registrado neste jogo.")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
@@ -482,23 +420,18 @@ elif st.session_state.tela == 'Equipe':
             st.write("Ofensivo (Finalizações)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f_coords)>0:
-                # Agora procura exclusivamente pela aba FINALIZACAO
-                mask_fin = df_f_coords['Categoria_Acao_Aba'] == 'FINALIZACAO'
+                mask_fin = df_f_coords['Evento'].astype(str).str.upper().str.contains('FINALIZA', na=False)
                 fins = df_f_coords[mask_fin]
-                if len(fins) == 0: 
-                    # Se não achar nada na aba, cai no backup de X>80
-                    fins = df_f_coords[df_f_coords['FieldX'] > 80]
-                
-                if len(fins) > 0:
-                    p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
+                if len(fins) == 0: fins = df_f_coords[df_f_coords['FieldX'] > 80]
+                if len(fins) > 0: p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
             st.pyplot(f)
 
     st.divider()
-    with st.expander("🛠️ DEPURADOR DE DADOS"):
+    with st.expander("🛠️ DEPURADOR DE DADOS (Tabela Plana)"):
         if df_jogo.empty: st.error("Nenhum dado encontrado.")
         else:
-            st.write("**Abas lidas do Excel:**", df_jogo['Categoria_Acao_Aba'].unique().tolist())
-            st.write("**Total de ações:**", len(df_jogo))
+            st.write("**Total de ações extraídas:**", len(df_jogo))
+            st.dataframe(df_jogo.head(5), use_container_width=True)
 
 elif st.session_state.tela == 'Grid':
     st.title("ELENCO")

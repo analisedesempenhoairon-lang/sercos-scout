@@ -208,7 +208,11 @@ def carregar_scouts_jogos_dinamico(links_selecionados, nomes_jogos):
                             elif c_str in ['Time', 'Tempo (s)']: cols_novas[c] = 'Tempo'
                             elif c_str in ['Player', 'Atleta']: cols_novas[c] = 'Jogadores'
                         data.rename(columns=cols_novas, inplace=True)
+                        
+                        # --- CAPTURA A CATEGORIA DO NOME DA ABA E DA PRIMEIRA COLUNA ---
                         data['Jogo'] = nome_exibicao
+                        data['Categoria_Acao'] = sheet
+                        data['Categoria_Acao_Col0'] = data.iloc[:, 0].astype(str)
                         dfs.append(data)
         except: continue
             
@@ -232,8 +236,17 @@ def carregar_scouts_jogos_dinamico(links_selecionados, nomes_jogos):
         df['Minuto'] = df['Tempo'].apply(t_min)
         
     if 'Jogadores' in df.columns:
-        df['Passador'] = df['Jogadores'].astype(str).apply(lambda x: x.split('|')[0].strip())
-        df['Receptor'] = df['Jogadores'].astype(str).apply(lambda x: x.split('|')[1].strip() if '|' in x else None)
+        # Lê os jogadores suportando vírgula ou traço no lugar da barra vertical (|)
+        def processar_passador(x):
+            s = str(x).replace(',', '|').replace(' - ', '|').split('|')
+            return s[0].strip()
+            
+        def processar_receptor(x):
+            s = str(x).replace(',', '|').replace(' - ', '|').split('|')
+            return s[1].strip() if len(s) > 1 else None
+
+        df['Passador'] = df['Jogadores'].apply(processar_passador)
+        df['Receptor'] = df['Jogadores'].apply(processar_receptor)
         df['Jogadores'] = df['Passador']
         
     if URL_NOMES:
@@ -400,10 +413,6 @@ if st.session_state.tela == 'Home':
 elif st.session_state.tela == 'Equipe':
     st.title("VISÃO GERAL DA EQUIPE")
     
-    # --- LINHA DE DEBUG ADICIONADA AQUI ---
-    if not df_jogo.empty:
-        st.error(f"COLUNAS LIDA PELO PYTHON: {df_jogo.columns.tolist()}")
-    
     if not df_campanha.empty:
         df_campanha.columns = df_campanha.columns.str.strip()
         vitorias = len(df_campanha[df_campanha['Resultado'].str.contains('Vitória', na=False)])
@@ -424,21 +433,14 @@ elif st.session_state.tela == 'Equipe':
     if not df_assistencias.empty: st.dataframe(df_assistencias, use_container_width=True, hide_index=True)
     st.divider(); st.subheader("Controle de Cartões")
     if not df_cartoes.empty: st.dataframe(df_cartoes, use_container_width=True, hide_index=True)
-    
-    # Procura dinamicamente o nome da coluna de Eventos
-    col_evento = None
-    if not df_jogo.empty:
-        for c in df_jogo.columns:
-            if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION', 'TIPO', 'NOME']:
-                col_evento = c
-                break
 
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        if col_evento:
-            # Filtra onde a ação contém "PASSE" (pega Passe Chave, Passe, Passe Progressao, etc)
-            mask_passe = df_jogo[col_evento].astype(str).str.upper().str.contains('PASSE', na=False)
+        # Filtra onde a aba do arquivo OU a 1ª coluna contém a palavra "PASSE"
+        if 'Categoria_Acao' in df_jogo.columns:
+            mask_passe = df_jogo['Categoria_Acao'].astype(str).str.upper().str.contains('PASSE', na=False) | \
+                         df_jogo['Categoria_Acao_Col0'].astype(str).str.upper().str.contains('PASSE', na=False)
             df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor'])
         else:
             df_passes_validos = df_jogo.dropna(subset=['Receptor'])
@@ -458,7 +460,7 @@ elif st.session_state.tela == 'Equipe':
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
         else:
-            st.info("Nenhum passe registrado nos dados com esse filtro.")
+            st.info("Nenhum passe com destinatário anotado. (Para a matriz funcionar, marque 'Passador | Receptor' no scout)")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
@@ -474,18 +476,22 @@ elif st.session_state.tela == 'Equipe':
             st.pyplot(f)
             
         with m2:
-            st.write("Mapa de Ações")
+            st.write("Mapa de Ações (Volume Total)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0: p_map.scatter(df_f.FieldX, df_f.FieldY, ax=a, c='#CC0000', alpha=0.5)
             st.pyplot(f)
             
         with m3:
-            st.write("Ofensivo")
+            st.write("Ofensivo (Finalizações)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0:
-                if col_evento:
-                    # Filtra especificamente qualquer ação que contenha "FINALIZA"
-                    fins = df_f[df_f[col_evento].astype(str).str.upper().str.contains('FINALIZA', na=False)]
+                if 'Categoria_Acao' in df_f.columns:
+                    mask_fin = df_f['Categoria_Acao'].astype(str).str.upper().str.contains('FINALIZA', na=False) | \
+                               df_f['Categoria_Acao_Col0'].astype(str).str.upper().str.contains('FINALIZA', na=False)
+                    fins = df_f[mask_fin]
+                    # Se ele não encontrar nenhuma finalização anotada, volta a mostrar as ações na área
+                    if len(fins) == 0: 
+                        fins = df_f[df_f['FieldX'] > 80]
                 else:
                     fins = df_f[df_f['FieldX'] > 80]
                 

@@ -18,7 +18,6 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "graphviz"])
     import graphviz
 
-# Força o sistema a achar a pasta da instalação manual que você fez
 caminho_bin = r'C:\Program Files\Graphviz\bin'
 if os.path.exists(caminho_bin):
     if caminho_bin not in os.environ["PATH"]:
@@ -40,14 +39,12 @@ URL_CARTOES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc
 URL_CAMPANHA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1241314919&single=true&output=csv"
 URL_ASSISTENCIAS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=0&single=true&output=csv"
 
-# --- DICIONÁRIO DE CORES PERSONALIZADO (Bump Chart) ---
 CORES_EQUIPES = {
     "A.A. Serrana/FZ": "#90EE90", "ACM/Estacaville": "#006400", "América FC": "#FF4500",
     "Aviação F.C.": "#1E90FF", "Caxias F.C.": "#F8F8F8", "E.C. Panagua": "#0000FF",
     "G.E. Pirabeiraba": "#8B0000", "Pará FC": "#00BFFF", "Serbi": "#32CD32", "Sercos": "#FF0000"
 }
 
-# --- CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117 !important; color: white !important; }
@@ -60,7 +57,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES ---
 def get_export_url(url):
     if "/d/" not in url: return url
     file_id = url.split("/d/")[1].split("/")[0]
@@ -159,22 +155,20 @@ def separar_dados_atleta(df, atleta, tipo='linha'):
     except: pass
     return dados_assert, dados_volume, dados_minutos
 
-# --- SUPER CARREGADOR BLINDADO (v4) ---
+# --- O TRATOR (v5) ---
 @st.cache_data(ttl=300)
-def carregar_scouts_dinamico_v4(links_selecionados, nomes_jogos):
+def carregar_scouts_dinamico_v5(links_selecionados, nomes_jogos):
     if not links_selecionados: return pd.DataFrame()
     dfs = []
     headers_req = {'User-Agent': 'Mozilla/5.0'}
 
-    # PREPARA A LISTA DE NOMES PARA O SUPER CAÇADOR
     dic_nomes = {}
-    lista_nomes_validos = []
+    nomes_reais_validos = []
     if URL_NOMES:
         df_nomes_temp = carregar_planilha_csv(URL_NOMES)
         if not df_nomes_temp.empty:
             dic_nomes = dict(zip(df_nomes_temp['Nome_Arquivo'].astype(str).str.strip(), df_nomes_temp['Nome_Real'].astype(str).str.strip()))
-            lista_nomes_validos = [str(k).upper() for k in dic_nomes.keys()] + [str(v).upper() for v in dic_nomes.values()]
-            lista_nomes_validos = [n for n in lista_nomes_validos if n != 'NAN' and n != '']
+            nomes_reais_validos = list(set([str(v).strip() for v in dic_nomes.values() if str(v).strip() != 'nan']))
 
     for url, nome_exibicao in zip(links_selecionados, nomes_jogos):
         if pd.isna(url) or str(url).strip() == "": continue
@@ -215,6 +209,15 @@ def carregar_scouts_dinamico_v4(links_selecionados, nomes_jogos):
     if not dfs: return pd.DataFrame()
     df = pd.concat(dfs, ignore_index=True)
     df.columns = [str(c).strip() for c in df.columns]
+
+    # SUBSTITUIÇÃO GLOBAL (Traduz tudo de uma vez)
+    def traduzir_nome(x):
+        x_str = str(x).strip()
+        if x_str in dic_nomes: return dic_nomes[x_str]
+        return x_str
+
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].apply(traduzir_nome)
     
     if 'FieldX' not in df.columns and 'X' in df.columns: df.rename(columns={'X':'FieldX'}, inplace=True)
     if 'FieldY' not in df.columns and 'Y' in df.columns: df.rename(columns={'Y':'FieldY'}, inplace=True)
@@ -233,14 +236,14 @@ def carregar_scouts_dinamico_v4(links_selecionados, nomes_jogos):
         
     if 'Jogadores' in df.columns:
         def proc_passador(x):
-            if pd.isna(x): return None
+            if pd.isna(x) or str(x) == 'nan': return None
             x_str = str(x)
             for sep in ['|', '>', ',']:
                 if sep in x_str: return x_str.split(sep)[0].strip()
             return x_str.strip()
             
         def proc_receptor(x):
-            if pd.isna(x): return None
+            if pd.isna(x) or str(x) == 'nan': return None
             x_str = str(x)
             for sep in ['|', '>', ',']:
                 if sep in x_str:
@@ -252,30 +255,22 @@ def carregar_scouts_dinamico_v4(links_selecionados, nomes_jogos):
         df['Receptor'] = df['Jogadores'].apply(proc_receptor)
         df['Jogadores'] = df['Passador'] 
         
-        # --- O SUPER CAÇADOR DE RECEPTORES ---
-        # Se Receptor estiver vazio, ele varre as colunas Unnamed pra ver se acha algum nome
-        colunas_extras = [c for c in df.columns if 'UNNAMED' in str(c).upper() or 'TAG' in str(c).upper()]
-        if colunas_extras and lista_nomes_validos:
-            for idx, row in df.iterrows():
-                rec_atual = row.get('Receptor')
-                if pd.isna(rec_atual) or str(rec_atual).strip() == '' or str(rec_atual).strip() == 'None':
-                    for c in colunas_extras:
-                        val = str(row[c]).strip().upper()
-                        if val in lista_nomes_validos:
-                            df.at[idx, 'Receptor'] = str(row[c]).strip()
-                            break
+        # VARREDURA TOTAL DE RECEPTORES (Caça o nome em qualquer coluna)
+        colunas_busca = [c for c in df.columns if c not in ['Jogo', 'Categoria_Acao_Aba', 'Tempo', 'Minuto', 'FieldX', 'FieldY', 'Evento', 'Passador', 'Receptor', 'Jogadores']]
+        for idx, row in df.iterrows():
+            rec_atual = row.get('Receptor')
+            if pd.isna(rec_atual) or str(rec_atual).strip() in ['', 'None', 'nan']:
+                for c in colunas_busca:
+                    val = str(row[c]).strip()
+                    passador_atual = str(row.get('Passador')).strip()
+                    if val in nomes_reais_validos and val != passador_atual:
+                        df.at[idx, 'Receptor'] = val
+                        break
 
-    if dic_nomes:
-        for c in ['Jogadores', 'Passador', 'Receptor']:
-            if c in df.columns:
-                df[c] = df[c].astype(str).str.strip().replace(dic_nomes)
-                df[c] = df[c].replace({'nan': None, 'None': None, '<NA>': None, '': None})
-                
     if 'FieldX' in df.columns:
         df['FieldX'] = pd.to_numeric(df['FieldX'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
         df['FieldY'] = pd.to_numeric(df['FieldY'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
         
-        # ATENÇÃO: Retiramos o "dropna" daqui para NÃO apagar da base ações que não tenham coordenada (Volume Total)
         max_x = df['FieldX'].max()
         if max_x <= 1.1: 
             df['FieldX'] *= 120
@@ -394,8 +389,7 @@ if not df_campanha.empty and col_link in df_campanha.columns:
         links = selecao[col_link].tolist()
         nomes = selecao['Nome_Exibicao'].tolist()
     
-    # Chama a função NOVA (v4)
-    df_master = carregar_scouts_dinamico_v4(links, nomes)
+    df_master = carregar_scouts_dinamico_v5(links, nomes)
 else:
     df_master = pd.DataFrame()
 
@@ -438,7 +432,6 @@ elif st.session_state.tela == 'Equipe':
         for c in cols_evento:
             mask_passe = mask_passe | df_jogo[c].astype(str).str.upper().str.contains('PASS', na=False)
             
-        # Para desenhar a matriz, aqui sim excluímos quem não tem coordenada (dropna)
         df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor', 'FieldX', 'FieldY'])
 
         if not df_passes_validos.empty:
@@ -462,8 +455,6 @@ elif st.session_state.tela == 'Equipe':
     if not df_jogo.empty:
         tempo = st.sidebar.slider("Minutos do Jogo", 0, 90, (0, 90))
         df_f = df_jogo[(df_jogo['Minuto'] >= tempo[0]) & (df_jogo['Minuto'] <= tempo[1])]
-        
-        # Filtra os que tem X e Y apenas pra parte visual
         df_f_coords = df_f.dropna(subset=['FieldX', 'FieldY'])
         
         m1, m2, m3 = st.columns(3)
@@ -499,11 +490,10 @@ elif st.session_state.tela == 'Equipe':
             st.pyplot(f)
 
     st.divider()
-    with st.expander("🛠️ DEPURADOR DE DADOS (Clique em caso de erro)"):
+    with st.expander("🛠️ DEPURADOR DE DADOS"):
         if df_jogo.empty: st.error("Nenhum dado encontrado.")
         else:
             st.write("**Colunas detectadas:**", df_jogo.columns.tolist())
-            st.write("**Total de métricas (com ou sem XY):**", len(df_jogo))
             if 'Passador' in df_jogo.columns: st.write("**Lidos como PASSADOR:**", df_jogo['Passador'].dropna().unique().tolist())
             if 'Receptor' in df_jogo.columns: st.write("**Lidos como RECEPTOR:**", df_jogo['Receptor'].dropna().unique().tolist())
 
@@ -593,7 +583,6 @@ elif st.session_state.tela == 'Player':
             st.plotly_chart(fig, use_container_width=True)
     
     k1, k2, k3, k4 = st.columns(4)
-    # Conta TODAS as métricas, mesmo as sem coordenadas
     acoes_total = len(df_jogo[df_jogo['Jogadores'] == p]) if not df_jogo.empty else 0
     k1.metric("Ações Totais no Jogo", acoes_total)
     
@@ -611,7 +600,6 @@ elif st.session_state.tela == 'Player':
             p_pitch = Pitch(pitch_type='statsbomb', pitch_color='#1e1e1e', line_color='#444')
             f_pitch, a_pitch = p_pitch.draw(figsize=(10, 6))
             
-            # Aqui no desenho, exclui os que não têm coordenada visual
             df_p_coords = df_p_scout.dropna(subset=['FieldX', 'FieldY'])
             if len(df_p_coords) > 2:
                 p_pitch.kdeplot(df_p_coords.FieldX, 80 - df_p_coords.FieldY, ax=a_pitch, cmap='Reds', fill=True, alpha=0.6, levels=50)
@@ -620,7 +608,6 @@ elif st.session_state.tela == 'Player':
                 p_pitch.scatter(df_p_coords.FieldX, 80 - df_p_coords.FieldY, ax=a_pitch, c='#CC0000', s=50)
             st.pyplot(f_pitch)
 
-    # --- NOVO BLOCO: MAPA CONCEITUAL DINÂMICO ---
     st.divider()
     st.markdown("### Mapa de Vulnerabilidade sob Estresse (MVE)")
     

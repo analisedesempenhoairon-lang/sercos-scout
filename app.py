@@ -399,6 +399,11 @@ if st.session_state.tela == 'Home':
 
 elif st.session_state.tela == 'Equipe':
     st.title("VISÃO GERAL DA EQUIPE")
+    
+    # --- LINHA DE DEBUG ADICIONADA AQUI ---
+    if not df_jogo.empty:
+        st.error(f"COLUNAS LIDA PELO PYTHON: {df_jogo.columns.tolist()}")
+    
     if not df_campanha.empty:
         df_campanha.columns = df_campanha.columns.str.strip()
         vitorias = len(df_campanha[df_campanha['Resultado'].str.contains('Vitória', na=False)])
@@ -455,9 +460,8 @@ elif st.session_state.tela == 'Equipe':
         else:
             st.info("Nenhum passe registrado nos dados com esse filtro.")
 
-  st.divider(); st.header("Análise Tática do Jogo")
+    st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
-        st.error(f"COLUNAS: {df_jogo.columns.tolist()}") # <--- ADICIONE ESTA LINHA AQUI
         tempo = st.sidebar.slider("Minutos do Jogo", 0, 90, (0, 90))
         df_f = df_jogo[(df_jogo['Minuto'] >= tempo[0]) & (df_jogo['Minuto'] <= tempo[1])]
         m1, m2, m3 = st.columns(3)

@@ -422,7 +422,18 @@ elif st.session_state.tela == 'Equipe':
     
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
-        df_passes_validos = df_jogo.dropna(subset=['Receptor'])
+        
+        # Procura a coluna que contém o nome da ação no LongoMatch
+        col_evento = next((c for c in df_jogo.columns if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION']), None)
+        
+        if col_evento:
+            tipos_passes = ['PASSE CHAVE', 'PASSE', 'PASSE PROGRESSAO', 'PASSE ULT TERCO']
+            # Filtra apenas as linhas que correspondem a um desses passes exatos
+            df_passes_validos = df_jogo[df_jogo[col_evento].astype(str).str.upper().str.strip().isin(tipos_passes)]
+            df_passes_validos = df_passes_validos.dropna(subset=['Receptor'])
+        else:
+            df_passes_validos = df_jogo.dropna(subset=['Receptor'])
+
         if not df_passes_validos.empty:
             locs = df_passes_validos.groupby('Passador').agg({'FieldX':'mean','FieldY':'mean','Jogadores':'count'})
             p_net = df_passes_validos.groupby(['Passador','Receptor']).size().reset_index(name='q')
@@ -444,21 +455,31 @@ elif st.session_state.tela == 'Equipe':
         df_f = df_jogo[(df_jogo['Minuto'] >= tempo[0]) & (df_jogo['Minuto'] <= tempo[1])]
         m1, m2, m3 = st.columns(3)
         p_cfg = dict(pitch_type='statsbomb', pitch_color='#1e1e1e', line_color='#444')
+        
+        # Identifica a coluna de Evento novamente
+        col_evento = next((c for c in df_jogo.columns if str(c).upper().strip() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION']), None)
+
         with m1:
             st.write("Mapa de Calor")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0: p_map.kdeplot(df_f.FieldX, df_f.FieldY, ax=a, cmap='Reds', fill=True, alpha=0.7)
             st.pyplot(f)
+            
         with m2:
             st.write("Mapa de Ações")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0: p_map.scatter(df_f.FieldX, df_f.FieldY, ax=a, c='#CC0000', alpha=0.5)
             st.pyplot(f)
+            
         with m3:
             st.write("Ofensivo")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
             if len(df_f)>0:
-                fins = df_f[df_f['FieldX'] > 80]
+                if col_evento:
+                    # Filtra especificamente qualquer ação que contenha "FINALIZA"
+                    fins = df_f[df_f[col_evento].astype(str).str.upper().str.contains('FINALIZA', na=False)]
+                else:
+                    fins = df_f[df_f['FieldX'] > 80]
                 p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
             st.pyplot(f)
 

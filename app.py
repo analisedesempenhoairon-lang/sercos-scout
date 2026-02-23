@@ -30,19 +30,11 @@ warnings.filterwarnings("ignore")
 
 # --- 2. LINKS DE DADOS ---
 URL_ARQUIVO_GERAL = "https://docs.google.com/spreadsheets/d/1kvs8qoZTeZql99qt_NxTQ2ZsW33V8HEAkjaOdBivrYM/edit?usp=sharing"
-
-# LINK DA ABA MVE (Aba crua em formato CSV)
 URL_MAPA_MENTAL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1682508291&single=true&output=csv"
-
-# NOVO LINK DA ABA CLASSIFICACAO
 URL_CLASSIFICACAO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1057602586&single=true&output=csv"
-
-# Links de Imagens
 URL_LOGO = "https://drive.google.com/thumbnail?id=1w2DdLhtdx_ZYKtUoMf1EahvFf5b20Jzc&sz=w1000"
 URL_IMG_DESTRO = "https://drive.google.com/thumbnail?id=1SZH8O0MqZog-a13zWl6GYys7--1CjVgr&sz=w200"
 URL_IMG_CANHOTO = "https://drive.google.com/thumbnail?id=1UI4bBzGrGU5hmogTCeP4tGBXbSqXzlu2&sz=w200"
-
-# Links Auxiliares (Planilhas Públicas)
 URL_NOMES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=340587611&single=true&output=csv"
 URL_CARTOES = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1354689566&single=true&output=csv"
 URL_CAMPANHA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Zr4Htc0X7erIkHS2WrH-pwaKR5IRmdlmZ_AWigkXn8tD0Uuq4EtF2wc9Gg5UA8vMVcNG/pub?gid=1241314919&single=true&output=csv"
@@ -50,16 +42,9 @@ URL_ASSISTENCIAS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZA-C3dpQ4Z
 
 # --- DICIONÁRIO DE CORES PERSONALIZADO (Bump Chart) ---
 CORES_EQUIPES = {
-    "A.A. Serrana/FZ": "#90EE90",
-    "ACM/Estacaville": "#006400",
-    "América FC": "#FF4500",
-    "Aviação F.C.": "#1E90FF",
-    "Caxias F.C.": "#F8F8F8",
-    "E.C. Panagua": "#0000FF",
-    "G.E. Pirabeiraba": "#8B0000",
-    "Pará FC": "#00BFFF",
-    "Serbi": "#32CD32",
-    "Sercos": "#FF0000"
+    "A.A. Serrana/FZ": "#90EE90", "ACM/Estacaville": "#006400", "América FC": "#FF4500",
+    "Aviação F.C.": "#1E90FF", "Caxias F.C.": "#F8F8F8", "E.C. Panagua": "#0000FF",
+    "G.E. Pirabeiraba": "#8B0000", "Pará FC": "#00BFFF", "Serbi": "#32CD32", "Sercos": "#FF0000"
 }
 
 # --- CSS ---
@@ -75,8 +60,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES BÁSICAS ---
-
+# --- FUNÇÕES ---
 def get_export_url(url):
     if "/d/" not in url: return url
     file_id = url.split("/d/")[1].split("/")[0]
@@ -175,12 +159,22 @@ def separar_dados_atleta(df, atleta, tipo='linha'):
     except: pass
     return dados_assert, dados_volume, dados_minutos
 
-# --- NOVO CARREGADOR BLINDADO (v3) ---
+# --- SUPER CARREGADOR BLINDADO (v4) ---
 @st.cache_data(ttl=300)
-def carregar_scouts_dinamico_v3(links_selecionados, nomes_jogos):
+def carregar_scouts_dinamico_v4(links_selecionados, nomes_jogos):
     if not links_selecionados: return pd.DataFrame()
     dfs = []
     headers_req = {'User-Agent': 'Mozilla/5.0'}
+
+    # PREPARA A LISTA DE NOMES PARA O SUPER CAÇADOR
+    dic_nomes = {}
+    lista_nomes_validos = []
+    if URL_NOMES:
+        df_nomes_temp = carregar_planilha_csv(URL_NOMES)
+        if not df_nomes_temp.empty:
+            dic_nomes = dict(zip(df_nomes_temp['Nome_Arquivo'].astype(str).str.strip(), df_nomes_temp['Nome_Real'].astype(str).str.strip()))
+            lista_nomes_validos = [str(k).upper() for k in dic_nomes.keys()] + [str(v).upper() for v in dic_nomes.values()]
+            lista_nomes_validos = [n for n in lista_nomes_validos if n != 'NAN' and n != '']
 
     for url, nome_exibicao in zip(links_selecionados, nomes_jogos):
         if pd.isna(url) or str(url).strip() == "": continue
@@ -238,13 +232,11 @@ def carregar_scouts_dinamico_v3(links_selecionados, nomes_jogos):
         df['Minuto'] = df['Tempo'].apply(t_min)
         
     if 'Jogadores' in df.columns:
-        # Nova lógica de divisão: NÃO CORTA POR TRAÇO. Apenas pipe, maior que e vírgula.
         def proc_passador(x):
-            if pd.isna(x): return x
+            if pd.isna(x): return None
             x_str = str(x)
             for sep in ['|', '>', ',']:
-                if sep in x_str:
-                    return x_str.split(sep)[0].strip()
+                if sep in x_str: return x_str.split(sep)[0].strip()
             return x_str.strip()
             
         def proc_receptor(x):
@@ -253,30 +245,45 @@ def carregar_scouts_dinamico_v3(links_selecionados, nomes_jogos):
             for sep in ['|', '>', ',']:
                 if sep in x_str:
                     parts = x_str.split(sep)
-                    if len(parts) > 1 and parts[1].strip() != "":
-                        return parts[1].strip()
+                    if len(parts) > 1 and parts[1].strip() != "": return parts[1].strip()
             return None
 
         df['Passador'] = df['Jogadores'].apply(proc_passador)
         df['Receptor'] = df['Jogadores'].apply(proc_receptor)
         df['Jogadores'] = df['Passador'] 
         
-    if URL_NOMES:
-        df_nomes = carregar_planilha_csv(URL_NOMES)
-        if not df_nomes.empty:
-            dic_nomes = dict(zip(df_nomes['Nome_Arquivo'].astype(str).str.strip(), df_nomes['Nome_Real'].astype(str).str.strip()))
-            for c in ['Jogadores', 'Passador', 'Receptor']:
-                if c in df.columns:
-                    df[c] = df[c].astype(str).str.strip().replace(dic_nomes)
+        # --- O SUPER CAÇADOR DE RECEPTORES ---
+        # Se Receptor estiver vazio, ele varre as colunas Unnamed pra ver se acha algum nome
+        colunas_extras = [c for c in df.columns if 'UNNAMED' in str(c).upper() or 'TAG' in str(c).upper()]
+        if colunas_extras and lista_nomes_validos:
+            for idx, row in df.iterrows():
+                rec_atual = row.get('Receptor')
+                if pd.isna(rec_atual) or str(rec_atual).strip() == '' or str(rec_atual).strip() == 'None':
+                    for c in colunas_extras:
+                        val = str(row[c]).strip().upper()
+                        if val in lista_nomes_validos:
+                            df.at[idx, 'Receptor'] = str(row[c]).strip()
+                            break
+
+    if dic_nomes:
+        for c in ['Jogadores', 'Passador', 'Receptor']:
+            if c in df.columns:
+                df[c] = df[c].astype(str).str.strip().replace(dic_nomes)
+                df[c] = df[c].replace({'nan': None, 'None': None, '<NA>': None, '': None})
                 
     if 'FieldX' in df.columns:
-        # Pega apenas números caso o Excel tenha jogado letras junto (ex: "X: 12.5")
         df['FieldX'] = pd.to_numeric(df['FieldX'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
         df['FieldY'] = pd.to_numeric(df['FieldY'].astype(str).str.replace(',', '.').str.extract(r'([0-9.]+)')[0], errors='coerce')
-        df = df.dropna(subset=['FieldX', 'FieldY'])
+        
+        # ATENÇÃO: Retiramos o "dropna" daqui para NÃO apagar da base ações que não tenham coordenada (Volume Total)
         max_x = df['FieldX'].max()
-        if max_x <= 1.1: df['FieldX'] *= 120; df['FieldY'] *= 80
-        elif max_x <= 100: df['FieldX'] = (df['FieldX']/100)*120; df['FieldY'] = (df['FieldY']/100)*80
+        if max_x <= 1.1: 
+            df['FieldX'] *= 120
+            df['FieldY'] *= 80
+        elif max_x <= 100: 
+            df['FieldX'] = (df['FieldX']/100)*120
+            df['FieldY'] = (df['FieldY']/100)*80
+            
     return df
 
 def plot_radar_simples(categorias, valores, titulo, max_escala=None):
@@ -348,7 +355,6 @@ def exibir_bump_chart(url):
 
         fig.update_yaxes(autorange="reversed", dtick=1, showgrid=True, gridcolor='#333', title="POSIÇÃO")
         fig.update_xaxes(dtick=1, title="RODADA", gridcolor='#333', range=[1, ultima_rodada + 0.8])
-        
         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'), height=650, showlegend=False, margin=dict(l=0, r=120, t=50, b=50), hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -388,8 +394,8 @@ if not df_campanha.empty and col_link in df_campanha.columns:
         links = selecao[col_link].tolist()
         nomes = selecao['Nome_Exibicao'].tolist()
     
-    # Chama a função NOVA (v3)
-    df_master = carregar_scouts_dinamico_v3(links, nomes)
+    # Chama a função NOVA (v4)
+    df_master = carregar_scouts_dinamico_v4(links, nomes)
 else:
     df_master = pd.DataFrame()
 
@@ -427,13 +433,13 @@ elif st.session_state.tela == 'Equipe':
     if not df_jogo.empty and 'Receptor' in df_jogo.columns:
         st.divider(); st.header("Conexões de Passes")
         
-        # Super Filtro de Passes: Busca em qualquer coluna suspeita
         cols_evento = [c for c in df_jogo.columns if str(c).upper() in ['EVENTO', 'EVENT', 'CATEGORIA', 'ACTION', 'NOME', 'TIPO', 'CATEGORIA_ACAO_ABA']]
         mask_passe = pd.Series(False, index=df_jogo.index)
         for c in cols_evento:
             mask_passe = mask_passe | df_jogo[c].astype(str).str.upper().str.contains('PASS', na=False)
             
-        df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor'])
+        # Para desenhar a matriz, aqui sim excluímos quem não tem coordenada (dropna)
+        df_passes_validos = df_jogo[mask_passe].dropna(subset=['Receptor', 'FieldX', 'FieldY'])
 
         if not df_passes_validos.empty:
             locs = df_passes_validos.groupby('Passador').agg({'FieldX':'mean','FieldY':'mean','Jogadores':'count'})
@@ -450,55 +456,56 @@ elif st.session_state.tela == 'Equipe':
             matriz = pd.crosstab(df_passes_validos['Passador'], df_passes_validos['Receptor'])
             st.dataframe(matriz.style.background_gradient(cmap="Reds", axis=None), use_container_width=True)
         else:
-            st.info("Nenhum passe com receptor anotado neste jogo.")
+            st.info("Nenhum passe com receptor anotado (ou com coordenadas válidas) neste jogo.")
 
     st.divider(); st.header("Análise Tática do Jogo")
     if not df_jogo.empty:
         tempo = st.sidebar.slider("Minutos do Jogo", 0, 90, (0, 90))
         df_f = df_jogo[(df_jogo['Minuto'] >= tempo[0]) & (df_jogo['Minuto'] <= tempo[1])]
+        
+        # Filtra os que tem X e Y apenas pra parte visual
+        df_f_coords = df_f.dropna(subset=['FieldX', 'FieldY'])
+        
         m1, m2, m3 = st.columns(3)
         p_cfg = dict(pitch_type='statsbomb', pitch_color='#1e1e1e', line_color='#444')
         
         with m1:
             st.write("Mapa de Calor")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
-            if len(df_f)>0: p_map.kdeplot(df_f.FieldX, df_f.FieldY, ax=a, cmap='Reds', fill=True, alpha=0.7)
+            if len(df_f_coords)>0: p_map.kdeplot(df_f_coords.FieldX, df_f_coords.FieldY, ax=a, cmap='Reds', fill=True, alpha=0.7)
             st.pyplot(f)
             
         with m2:
             st.write("Mapa de Ações (Total)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
-            if len(df_f)>0: p_map.scatter(df_f.FieldX, df_f.FieldY, ax=a, c='#CC0000', alpha=0.5)
+            if len(df_f_coords)>0: p_map.scatter(df_f_coords.FieldX, df_f_coords.FieldY, ax=a, c='#CC0000', alpha=0.5)
             st.pyplot(f)
             
         with m3:
             st.write("Ofensivo (Finalizações)")
             p_map = VerticalPitch(**p_cfg); f, a = p_map.draw()
-            if len(df_f)>0:
-                mask_fin = pd.Series(False, index=df_f.index)
+            if len(df_f_coords)>0:
+                mask_fin = pd.Series(False, index=df_f_coords.index)
                 for c in cols_evento:
-                    mask_fin = mask_fin | df_f[c].astype(str).str.upper().str.contains('FINALIZA', na=False)
-                    mask_fin = mask_fin | df_f[c].astype(str).str.upper().str.contains('CHUTE', na=False)
+                    mask_fin = mask_fin | df_f_coords[c].astype(str).str.upper().str.contains('FINALIZA', na=False)
+                    mask_fin = mask_fin | df_f_coords[c].astype(str).str.upper().str.contains('CHUTE', na=False)
                 
-                fins = df_f[mask_fin]
+                fins = df_f_coords[mask_fin]
                 if len(fins) == 0: 
-                    fins = df_f[df_f['FieldX'] > 80]
+                    fins = df_f_coords[df_f_coords['FieldX'] > 80]
                 
                 if len(fins) > 0:
                     p_map.scatter(fins.FieldX, fins.FieldY, ax=a, c='white', marker='*')
             st.pyplot(f)
 
-    # --- NOVO: BOTAO PARA DEPURACAO ---
     st.divider()
     with st.expander("🛠️ DEPURADOR DE DADOS (Clique em caso de erro)"):
-        if df_jogo.empty:
-            st.error("Nenhum dado encontrado para este jogo.")
+        if df_jogo.empty: st.error("Nenhum dado encontrado.")
         else:
             st.write("**Colunas detectadas:**", df_jogo.columns.tolist())
-            if 'Jogadores' in df_jogo.columns:
-                st.write("**Jogadores na planilha (já traduzidos):**", df_jogo['Jogadores'].unique().tolist())
-            if 'Passador' in df_jogo.columns:
-                st.write("**Nomes lidos como PASSADOR:**", df_jogo['Passador'].unique().tolist())
+            st.write("**Total de métricas (com ou sem XY):**", len(df_jogo))
+            if 'Passador' in df_jogo.columns: st.write("**Lidos como PASSADOR:**", df_jogo['Passador'].dropna().unique().tolist())
+            if 'Receptor' in df_jogo.columns: st.write("**Lidos como RECEPTOR:**", df_jogo['Receptor'].dropna().unique().tolist())
 
 elif st.session_state.tela == 'Grid':
     st.title("ELENCO")
@@ -586,8 +593,9 @@ elif st.session_state.tela == 'Player':
             st.plotly_chart(fig, use_container_width=True)
     
     k1, k2, k3, k4 = st.columns(4)
+    # Conta TODAS as métricas, mesmo as sem coordenadas
     acoes_total = len(df_jogo[df_jogo['Jogadores'] == p]) if not df_jogo.empty else 0
-    k1.metric("Ações no Scout", acoes_total)
+    k1.metric("Ações Totais no Jogo", acoes_total)
     
     if not df_jogo.empty:
         df_p_scout = df_jogo[df_jogo['Jogadores'] == p]
@@ -596,17 +604,20 @@ elif st.session_state.tela == 'Player':
             st.markdown("### Perfil Técnico")
             df_rec_scout = df_jogo[df_jogo['Receptor'] == p]
             if not df_rec_scout.empty:
-                st.write("**Quem passou para ele:**")
+                st.write("**Quem mais passou para ele:**")
                 st.dataframe(df_rec_scout['Passador'].value_counts().reset_index(name='Passes').head(5), hide_index=True, use_container_width=True)
         with c_b:
             st.markdown("### Mapa de Calor (Scout)")
             p_pitch = Pitch(pitch_type='statsbomb', pitch_color='#1e1e1e', line_color='#444')
             f_pitch, a_pitch = p_pitch.draw(figsize=(10, 6))
-            if len(df_p_scout) > 2:
-                p_pitch.kdeplot(df_p_scout.FieldX, 80 - df_p_scout.FieldY, ax=a_pitch, cmap='Reds', fill=True, alpha=0.6, levels=50)
-                p_pitch.scatter(df_p_scout.FieldX, 80 - df_p_scout.FieldY, ax=a_pitch, c='white', alpha=0.2, s=10)
-            elif len(df_p_scout) > 0:
-                p_pitch.scatter(df_p_scout.FieldX, 80 - df_p_scout.FieldY, ax=a_pitch, c='#CC0000', s=50)
+            
+            # Aqui no desenho, exclui os que não têm coordenada visual
+            df_p_coords = df_p_scout.dropna(subset=['FieldX', 'FieldY'])
+            if len(df_p_coords) > 2:
+                p_pitch.kdeplot(df_p_coords.FieldX, 80 - df_p_coords.FieldY, ax=a_pitch, cmap='Reds', fill=True, alpha=0.6, levels=50)
+                p_pitch.scatter(df_p_coords.FieldX, 80 - df_p_coords.FieldY, ax=a_pitch, c='white', alpha=0.2, s=10)
+            elif len(df_p_coords) > 0:
+                p_pitch.scatter(df_p_coords.FieldX, 80 - df_p_coords.FieldY, ax=a_pitch, c='#CC0000', s=50)
             st.pyplot(f_pitch)
 
     # --- NOVO BLOCO: MAPA CONCEITUAL DINÂMICO ---
